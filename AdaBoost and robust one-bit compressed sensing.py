@@ -24,9 +24,14 @@ def sparse_rademacher_prior_beta(s,p):
     np.random.shuffle(tmp)
     return(tmp)
 
-def sign_flip(n,corr): #corr is the number of corrupted observations
+def adversary(X,beta,corr): #corr is the number of corrupted observations
+    #find elements with largest influence
+    candidates = abs(np.dot(X,beta))
+    vandalize = np.argsort(-candidates)[0:corr] #find indices to be manipulated
+    
     tmp = np.repeat(1,n)
-    tmp[np.random.choice(range(0,n),corr,replace = False)] = -1
+    tmp[vandalize] = -1
+    
     return(tmp)
 
 #how p is calculated
@@ -92,7 +97,104 @@ def Ada(n,p,s,yX,T,eps): #T is run time, eps is learning rate
     return(bet_tilde/np.linalg.norm(bet_tilde,2))
 
 ###############################################################################
-# Plot 1: How Margin changes with number of observations
+# Plot 1: Distance to \beta^* as number of observations n grows - Adversarial
+###############################################################################
+
+DISTANCE = np.ones([10], dtype = float) 
+DISTANCE_ADA = np.ones([10], dtype = float) 
+
+s = 5  # sparsity
+eps = 0.2 #step size adaboost
+
+np.random.seed(0) 
+
+for i in range(0,10):
+    print('Iteration:', i+1)
+    
+    n = 100*i+100 # number of observations
+    
+    p = f_1(n) # dimension of observations
+    beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
+    corr = 40 # number of corrupted observations
+    X = np.random.normal(size = (n,p)) # design matrix
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*adversary(X,beta,corr) # adversarial corruption of Y
+    yX = np.dot(np.diag(Y),X) 
+    
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2) # calculating distance
+    
+    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
+    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
+    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2) # calculating distance
+    
+###############################################################################
+# Plot 2: Distance to \beta^* as contamination |O| grows - Adversarial
+###############################################################################
+
+DISTANCE = np.ones([10], dtype = float)
+DISTANCE_ADA = np.ones([10], dtype = float)
+
+n = 500 # number of observations
+p = f_1(n) # dimension of observations
+s = 5 # sparsity
+eps = 0.2 # step size adaboost
+
+np.random.seed(0)    
+beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
+X = np.random.normal(size = (n,p)) # design matrix 
+    
+for i in range(0,10):
+    print('Iteration:', i+1)
+    
+    corr = 5*i+5  # number of corrupted observations
+        
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*adversary(X,beta,corr) # adversarial corruption of Y
+    yX = np.dot(np.diag(Y),X) 
+    
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2) # calculating distance
+        
+    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
+    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
+    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2) # calculating distance
+
+###############################################################################
+# Plot 3: Distance to \beta^* as number of observations n grows - Noiseless
+###############################################################################
+
+DISTANCE = np.ones([10], dtype = float) 
+DISTANCE_ADA = np.ones([10], dtype = float) 
+
+s = 5  # sparsity
+eps = 0.2 # step size adaboost
+
+np.random.seed(0)
+
+for i in range(0,10):
+    print('Iteration:', i+1)
+    
+    n = 100*i+100 # number of observations
+    
+    p = f_1(n) # dimension of observations
+    beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
+    X = np.random.normal(size = (n,p)) # design matrix
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    yX = np.dot(np.diag(Y),X) 
+    
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2) # calculating distance
+    
+    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
+    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
+    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2) # calculating distance
+
+###############################################################################
+# Plot 4: Margin as number of observations n grows - Noiseless
 ###############################################################################
 
 MARGIN = np.ones([10], dtype = float) #initialize
@@ -106,121 +208,22 @@ np.random.seed(0)
 for i in range(0,10):
     print('Iteration:', i+1)
 
-    n = 100*i+100
+    n = 100*i+100 # number of observations
     
-    corr = int(n*0.01)
-    p = f_1(n)
-    beta = sparse_rademacher_prior_beta(s, p)
+    p = f_1(n) # dimension of observations
+    beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
     
     X = np.random.normal(size = (n,p)) # design matrix
     Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
-    Y = Y*sign_flip(n,corr)
     yX = np.dot(np.diag(Y),X) 
     
-    sol_max_margin = max_margin(n,p,yX)
-    MARGIN[i] = max_margin_margin(sol_max_margin,p)
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    MARGIN[i] = max_margin_margin(sol_max_margin,p) # extracting \gamma
 
-    T = f_T(n,p,s,corr,eps)
-    beta_Ada = Ada(n,p,s,yX,T,eps)
+    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
+    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
     tmp = np.dot(yX, beta_Ada)/np.linalg.norm(beta_Ada,1)
-    MARGIN_ADA[i] = np.min(tmp)
-    
-###############################################################################
-# Plot 2: Euclidean distance to \beta^* as number of observations n grows
-###############################################################################
+    MARGIN_ADA[i] = np.min(tmp) # calculating \tilde{\gamma}_T
 
-DISTANCE = np.ones([10], dtype = float) 
-DISTANCE_ADA = np.ones([10], dtype = float) 
 
-s = 5  # Sparsity
-eps = 0.2 #step size adaboost
-
-np.random.seed(0)
-
-for i in range(0,10):
-    print('Iteration:', i+1)
-    
-    n = 100*i+100
-    
-    p = f_1(n)
-    beta = sparse_rademacher_prior_beta(s, p)
-    corr = int(n*0.01)
-    X = np.random.normal(size = (n,p)) # design matrix
-    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
-    Y = Y*sign_flip(n,corr)
-    yX = np.dot(np.diag(Y),X) 
-    
-    sol_max_margin = max_margin(n,p,yX)
-    beta_max_margin = max_margin_beta(sol_max_margin,p)
-    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2)
-    
-    T = f_T(n,p,s,corr,eps)
-    beta_Ada = Ada(n,p,s,yX,T,eps)
-    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2)
-    
-###############################################################################
-# Plot 3: Euclidean distance to \beta^* as sparsity s grows
-###############################################################################
-
-DISTANCE = np.ones([10], dtype = float) 
-DISTANCE_ADA = np.ones([10], dtype = float) 
-
-n = 500
-p = f_1(n)
-corr = int(n*0.01)
-eps = 0.2 #step size adaboost
-
-np.random.seed(0)
-X = np.random.normal(size = (n,p)) # design matrix
-    
-for i in range(0,10):
-    print('Iteration:', i+1)
-    
-    s = 5*i+5  # Sparsity
-    
-    beta = sparse_rademacher_prior_beta(s,p)
-    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
-    Y = Y*sign_flip(n,corr)
-    yX = np.dot(np.diag(Y),X) 
-    
-    sol_max_margin = max_margin(n,p,yX)
-    beta_max_margin = max_margin_beta(sol_max_margin,p)
-    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2)
-    
-    T = f_T(n,p,s,corr,eps)
-    beta_Ada = Ada(n,p,s,yX,T,eps)
-    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2)
-
-###############################################################################
-# Plot 4: Euclidean distance to \beta^* as contamination |O| grows
-###############################################################################
-
-DISTANCE = np.ones([10], dtype = float)
-DISTANCE_ADA = np.ones([10], dtype = float)
-
-n = 500
-p = f_1(n)
-s = 5
-eps = 0.2 #step size adaboost
-
-np.random.seed(0)    
-beta = sparse_rademacher_prior_beta(s, p)
-X = np.random.normal(size = (n,p)) # design matrix 
-    
-for i in range(0,10):
-    print('Iteration:', i+1)
-    
-    corr = 5*i+5  # number of corrupted observations
-        
-    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
-    Y = Y*sign_flip(n,corr)
-    yX = np.dot(np.diag(Y),X) 
-    
-    sol_max_margin = max_margin(n,p,yX)
-    beta_max_margin = max_margin_beta(sol_max_margin,p)
-    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2)
-        
-    T = f_T(n,p,s,corr,eps)
-    beta_Ada = Ada(n,p,s,yX,T,eps)
-    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2)
 
