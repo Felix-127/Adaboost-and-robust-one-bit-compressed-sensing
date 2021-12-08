@@ -11,6 +11,7 @@ Geoffrey Chinot, Felix Kuchelmeister, Matthias Löffler and Sara van de Geer
 
 import numpy as np
 from scipy.optimize import linprog
+import matplotlib.pyplot as plt
 
 ###############################################################################
 # Functions
@@ -24,23 +25,29 @@ def sparse_rademacher_prior_beta(s,p):
     np.random.shuffle(tmp)
     return(tmp)
 
-def adversary(X,beta,corr): #corr is the number of corrupted observations
-    #find elements with largest influence
-    candidates = abs(np.dot(X,beta))
-    vandalize = np.argsort(-candidates)[0:corr] #find indices to be manipulated
-    
+#sign-flips (noise)
+def sign_flip(n,corr): #corr is the number of corrupted observations
+    #find elements with largest margin
     tmp = np.repeat(1,n)
-    tmp[vandalize] = -1
-    
+    tmp[np.random.choice(range(0,n),corr,replace = False)] = -1
     return(tmp)
+
+#how the prediction error is simulated
+def mc_loss(beta_0,beta_hat,n_sim):
+    p = np.size(beta_0)
+    X_mc = np.random.normal(size = (n_sim,p)) #simulate features
+    y_0 = np.sign(np.dot(X_mc,beta_0)) #simulate correct labels
+    y_hat = np.sign(np.dot(X_mc,beta_hat)) #simulate predicted labels
+    return(sum(y_0!=y_hat)/n_sim) #report average 0/1-loss over n_sim simulations
 
 #how p is calculated
 def f_1(n):
-    return(2*int(n**1.1))
+    return(10*n)
 
 #how T is calculated
 def f_T(n,p,s,corr,eps):
-    return(2*int(np.log(p)**(4/3)*n**(2/3)*(s+corr)**(1/3)/eps))
+    T = (n*np.sqrt(s+corr))**(2/3)*np.log(p)*eps**(-2)
+    return(int(T))
 
 def max_margin(n,p,yX):
     C = np.concatenate((-yX,yX),axis = 1) 
@@ -61,7 +68,7 @@ def max_margin_margin(res,p):
     tmp = res.x[0:p] - res.x[p:2*p]
     return(1/np.linalg.norm(tmp,1))
 
-def Ada(n,p,s,yX,T,eps): #T is run time, eps is learning rate
+def Ada(n,p,yX,T,eps): #T is run time, eps is learning rate
     #initialize
     bet_tilde = np.zeros(p, dtype = float) 
     W = np.zeros(n, dtype = float)
@@ -97,133 +104,283 @@ def Ada(n,p,s,yX,T,eps): #T is run time, eps is learning rate
     return(bet_tilde/np.linalg.norm(bet_tilde,2))
 
 ###############################################################################
-# Plot 1: Distance to \beta^* as number of observations n grows - Adversarial
+# Plot 1/3/4: Prediction error as number of observations n grows
 ###############################################################################
 
-DISTANCE = np.ones([10], dtype = float) 
-DISTANCE_ADA = np.ones([10], dtype = float) 
+#initialize prediciton errors
+    #prediction errors for max margin
+ERROR_MAX_NORMAL  = np.ones([10], dtype = float)
+ERROR_MAX_STUDENT = np.ones([10], dtype = float)
+ERROR_MAX_UNIFORM = np.ones([10], dtype = float)
+ERROR_MAX_LAPLACE = np.ones([10], dtype = float)
+
+    #prediction errors for adaboost
+ERROR_ADA_NORMAL  = np.ones([10], dtype = float)
+ERROR_ADA_STUDENT = np.ones([10], dtype = float)
+ERROR_ADA_UNIFORM = np.ones([10], dtype = float)
+ERROR_ADA_LAPLACE = np.ones([10], dtype = float)
+
+#initialize margins
+    #margin for max margin
+MARGIN_MAX_NORMAL  = np.ones([10], dtype = float)
+MARGIN_MAX_STUDENT = np.ones([10], dtype = float)
+MARGIN_MAX_UNIFORM = np.ones([10], dtype = float)
+MARGIN_MAX_LAPLACE = np.ones([10], dtype = float)
+
+    #margin for adaboost
+MARGIN_ADA_NORMAL  = np.ones([10], dtype = float)
+MARGIN_ADA_STUDENT = np.ones([10], dtype = float)
+MARGIN_ADA_UNIFORM = np.ones([10], dtype = float)
+MARGIN_ADA_LAPLACE = np.ones([10], dtype = float)
 
 s = 5  # sparsity
 eps = 0.2 #step size adaboost
+n_mc = 10000 #number of simulations for approximation of prediction error
+sequence_ = np.arange(100,1100,100) # number of observations
+
+# number of corrupted observations
+corr = 40 #for plot 1
+#corr = 0 #for plots 3 and 4
 
 np.random.seed(0) 
 
-for i in range(0,10):
-    print('Iteration:', i+1)
-    
-    n = 100*i+100 # number of observations
-    
+for i in range(0,10):   
+    n = sequence_[i] # number of observations
+    print('Iteration:', i+1, ', n = ', n)
     p = f_1(n) # dimension of observations
+    T = f_T(n,p,s,corr,eps) # number of steps for adaboost. CHOOSE LOWER T TO SPEED UP COMPUTATION
+    RAD = sign_flip(n, corr) #Corrputions of the labels
     beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
-    corr = 40 # number of corrupted observations
-    X = np.random.normal(size = (n,p)) # design matrix
-    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
-    Y = Y*adversary(X,beta,corr) # adversarial corruption of Y
-    yX = np.dot(np.diag(Y),X) 
     
+    #NORMAL
+    X = np.random.normal(size = (n,p)) # design matrix normal
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
+    yX = np.dot(np.diag(Y),X) 
+          
+        #MAX MARGIN
     sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
     beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
-    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2) # calculating distance
+    ERROR_MAX_NORMAL[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error
     
-    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
-    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
-    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2) # calculating distance
+    tmp = np.dot(yX, beta_max_margin)
+    MARGIN_MAX_NORMAL[i] = np.min(tmp)/np.linalg.norm(beta_max_margin,1)
+    
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_NORMAL[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
+    
+    tmp = np.dot(yX, beta_Ada)
+    MARGIN_ADA_NORMAL[i] = np.min(tmp)/np.linalg.norm(beta_Ada,1)
+
+    #STUDENT
+    X = np.random.standard_t(df = int(np.log(p))+1, size=(n,p)) # design matrix student
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
+    yX = np.dot(np.diag(Y),X) 
+    
+        #MAX MARGIN
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    ERROR_MAX_STUDENT[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error
+    
+    tmp = np.dot(yX, beta_max_margin)
+    MARGIN_MAX_STUDENT[i] = np.min(tmp)/np.linalg.norm(beta_max_margin,1)
+
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_STUDENT[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
+    
+    tmp = np.dot(yX, beta_Ada)
+    MARGIN_ADA_STUDENT[i] = np.min(tmp)/np.linalg.norm(beta_Ada,1)
+    
+    #UNIFORM
+    X = np.random.uniform(low = -(3/2)**(1/3), high = (3/2)**(1/3), size=(n,p))
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
+    yX = np.dot(np.diag(Y),X) 
+      
+        #MAX MARGIN
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    ERROR_MAX_UNIFORM[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error    
+    
+    tmp = np.dot(yX, beta_max_margin)
+    MARGIN_MAX_UNIFORM[i] = np.min(tmp)/np.linalg.norm(beta_max_margin,1)
+      
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_UNIFORM[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
+    
+    tmp = np.dot(yX, beta_Ada)
+    MARGIN_ADA_UNIFORM[i] = np.min(tmp)/np.linalg.norm(beta_Ada,1)
+    
+    #LAPLACE
+    X = np.random.laplace(loc=0, scale = 1, size = (n,p))
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
+    yX = np.dot(np.diag(Y),X) 
+      
+        #MAX MARGIN
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    ERROR_MAX_LAPLACE[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error
+    
+    tmp = np.dot(yX, beta_max_margin)
+    MARGIN_MAX_LAPLACE[i] = np.min(tmp)/np.linalg.norm(beta_max_margin,1)
+    
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_LAPLACE[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
+    
+    tmp = np.dot(yX, beta_Ada)
+    MARGIN_ADA_LAPLACE[i] = np.min(tmp)/np.linalg.norm(beta_Ada,1)
+
+#Plot 1 & 3 (Prediction error)
+xlabel_ = '$n$'
+ylabel_ = 'Prediction error'
+legend_ = ["Normal","Student","Uniform","Laplace"]
+
+plt.plot(sequence_,ERROR_MAX_NORMAL, "blue", linestyle = "solid")
+plt.plot(sequence_,ERROR_MAX_STUDENT, "purple", linestyle = "solid")
+plt.plot(sequence_,ERROR_MAX_UNIFORM, "orange", linestyle = "solid")
+plt.plot(sequence_,ERROR_MAX_LAPLACE, "green", linestyle = "solid")
+
+plt.plot(sequence_,ERROR_ADA_NORMAL, "blue", linestyle = "dashdot")
+plt.plot(sequence_,ERROR_ADA_STUDENT, "purple", linestyle = "dashdot")
+plt.plot(sequence_,ERROR_ADA_UNIFORM, "orange", linestyle = "dashdot")
+plt.plot(sequence_,ERROR_ADA_LAPLACE, "green", linestyle = "dashdot")
+
+plt.xlabel(xlabel_)
+plt.ylabel(ylabel_)
+plt.legend(legend_, frameon = False)
+
+#Plot 4 (Margin)
+xlabel_ = '$n$'
+ylabel_ = 'Margin'
+legend_ = ["Normal","Student","Uniform","Laplace"]
+
+plt.plot(sequence_,MARGIN_MAX_NORMAL, "blue", linestyle = "solid")
+plt.plot(sequence_,MARGIN_MAX_STUDENT, "purple", linestyle = "solid")
+plt.plot(sequence_,MARGIN_MAX_UNIFORM, "orange", linestyle = "solid")
+plt.plot(sequence_,MARGIN_MAX_LAPLACE, "green", linestyle = "solid")
+
+plt.plot(sequence_,MARGIN_ADA_NORMAL, "blue", linestyle = "dashdot")
+plt.plot(sequence_,MARGIN_ADA_STUDENT, "purple", linestyle = "dashdot")
+plt.plot(sequence_,MARGIN_ADA_UNIFORM, "orange", linestyle = "dashdot")
+plt.plot(sequence_,MARGIN_ADA_LAPLACE, "green", linestyle = "dashdot")
+
+plt.xlabel(xlabel_)
+plt.ylabel(ylabel_)
+plt.legend(legend_, frameon = False)
     
 ###############################################################################
-# Plot 2: Distance to \beta^* as contamination |O| grows - Adversarial
+# Plot 2: Prediction error as contamination |O| grows
 ###############################################################################
 
-DISTANCE = np.ones([10], dtype = float)
-DISTANCE_ADA = np.ones([10], dtype = float)
+#initialize prediciton errors
+    #prediction errors for max margin
+ERROR_MAX_NORMAL  = np.ones([10], dtype = float)
+ERROR_MAX_STUDENT = np.ones([10], dtype = float)
+ERROR_MAX_UNIFORM = np.ones([10], dtype = float)
+ERROR_MAX_LAPLACE = np.ones([10], dtype = float)
+
+    #prediction errors for adaboost
+ERROR_ADA_NORMAL  = np.ones([10], dtype = float)
+ERROR_ADA_STUDENT = np.ones([10], dtype = float)
+ERROR_ADA_UNIFORM = np.ones([10], dtype = float)
+ERROR_ADA_LAPLACE = np.ones([10], dtype = float)
 
 n = 500 # number of observations
 p = f_1(n) # dimension of observations
 s = 5 # sparsity
 eps = 0.2 # step size adaboost
+n_mc = 10000 #number of simulations for approximation of prediction error
 
 np.random.seed(0)    
-beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
-X = np.random.normal(size = (n,p)) # design matrix 
     
 for i in range(0,10):
-    print('Iteration:', i+1)
+    corr = 5*i
+    print("#corruptions =",corr)
+    T = f_T(n,p,s,corr,eps) # number of iterations for adaboost. CHOOSE LOWER T TO SPEED UP COMPUTATION
+    RAD = sign_flip(n, corr) #Noise
+    beta = sparse_rademacher_prior_beta(s, p) #generate beta
     
-    corr = 5*i+5  # number of corrupted observations
-        
+    #NORMAL
+    X = np.random.normal(size = (n,p)) # design matrix normal
     Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
-    Y = Y*adversary(X,beta,corr) # adversarial corruption of Y
+    Y = Y*RAD
     yX = np.dot(np.diag(Y),X) 
     
+        #MAX MARGIN
     sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
     beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
-    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2) # calculating distance
-        
-    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
-    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
-    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2) # calculating distance
-
-###############################################################################
-# Plot 3: Distance to \beta^* as number of observations n grows - Noiseless
-###############################################################################
-
-DISTANCE = np.ones([10], dtype = float) 
-DISTANCE_ADA = np.ones([10], dtype = float) 
-
-s = 5  # sparsity
-eps = 0.2 # step size adaboost
-
-np.random.seed(0)
-
-for i in range(0,10):
-    print('Iteration:', i+1)
+    ERROR_MAX_NORMAL[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error
     
-    n = 100*i+100 # number of observations
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_NORMAL[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
     
-    p = f_1(n) # dimension of observations
-    beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
-    X = np.random.normal(size = (n,p)) # design matrix
+    #STUDENT
+    X = np.random.standard_t(df = int(np.log(p))+1, size=(n,p)) # design matrix student
     Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
     yX = np.dot(np.diag(Y),X) 
     
+        #MAX MARGIN
     sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
     beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
-    DISTANCE[i] = np.linalg.norm(beta_max_margin-beta,2) # calculating distance
-    
-    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
-    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
-    DISTANCE_ADA[i] = np.linalg.norm(beta_Ada-beta,2) # calculating distance
+    ERROR_MAX_STUDENT[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error
 
-###############################################################################
-# Plot 4: Margin as number of observations n grows - Noiseless
-###############################################################################
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_STUDENT[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
 
-MARGIN = np.ones([10], dtype = float) #initialize
-MARGIN_ADA = np.ones([10], dtype = float) #initialize
-
-s = 5  # Sparsity
-eps = 0.2 #step size adaboost
-
-np.random.seed(0)
-
-for i in range(0,10):
-    print('Iteration:', i+1)
-
-    n = 100*i+100 # number of observations
-    
-    p = f_1(n) # dimension of observations
-    beta = sparse_rademacher_prior_beta(s, p) # generating \beta^*
-    
-    X = np.random.normal(size = (n,p)) # design matrix
+    #UNIFORM
+    X = np.random.uniform(low = -(3/2)**(1/3), high = (3/2)**(1/3), size=(n,p))
     Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
     yX = np.dot(np.diag(Y),X) 
-    
+      
+        #MAX MARGIN
     sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
-    MARGIN[i] = max_margin_margin(sol_max_margin,p) # extracting \gamma
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    ERROR_MAX_UNIFORM[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error    
 
-    T = f_T(n,p,s,corr,eps) # number of steps for adaboost
-    beta_Ada = Ada(n,p,s,yX,T,eps) # calculating \tilde{\beta}_T
-    tmp = np.dot(yX, beta_Ada)/np.linalg.norm(beta_Ada,1)
-    MARGIN_ADA[i] = np.min(tmp) # calculating \tilde{\gamma}_T
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_UNIFORM[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
+    
+    #LAPLACE
+    X = np.random.laplace(loc=0, scale = 1, size = (n,p))
+    Y = np.sign(np.dot(X,beta)) # Y in the noiseless case
+    Y = Y*RAD
+    yX = np.dot(np.diag(Y),X) 
+      
+        #MAX MARGIN
+    sol_max_margin = max_margin(n,p,yX) # finding the max-margin solution
+    beta_max_margin = max_margin_beta(sol_max_margin,p) # extracting \hat{\beta}
+    ERROR_MAX_LAPLACE[i] = mc_loss(beta,beta_max_margin,n_mc) #estimating prediction error
+    
+        #ADABOOST
+    beta_Ada = Ada(n,p,yX,T,eps)
+    ERROR_ADA_LAPLACE[i] = mc_loss(beta,beta_Ada,n_mc) #estimating prediction error
 
+#Plot
+xlabel_ = '# Corruptions'
+ylabel_ = 'Prediction error'
+legend_ = ["Normal","Student","Uniform","Laplace"]
 
+plt.plot(sequence_,ERROR_MAX_NORMAL, "blue", linestyle = "solid")
+plt.plot(sequence_,ERROR_MAX_STUDENT, "purple", linestyle = "solid")
+plt.plot(sequence_,ERROR_MAX_UNIFORM, "orange", linestyle = "solid")
+plt.plot(sequence_,ERROR_MAX_LAPLACE, "green", linestyle = "solid")
 
+plt.plot(sequence_,ERROR_ADA_NORMAL, "blue", linestyle = "dashdot")
+plt.plot(sequence_,ERROR_ADA_STUDENT, "purple", linestyle = "dashdot")
+plt.plot(sequence_,ERROR_ADA_UNIFORM, "orange", linestyle = "dashdot")
+plt.plot(sequence_,ERROR_ADA_LAPLACE, "green", linestyle = "dashdot")
+
+plt.xlabel(xlabel_)
+plt.ylabel(ylabel_)
+plt.legend(legend_, frameon = False)
